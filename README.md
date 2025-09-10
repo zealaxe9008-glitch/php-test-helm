@@ -26,57 +26,30 @@ Why file-based sessions/cache?
 
 ---
 
-## Images: local vs registry
-You have two ways to make the image available to your cluster.
+## Project-specific changes checklist (what you should change)
+- Image name/tag:
+  - Local (minikube): keep `phpapp:apache` or rename via `--set image.repository=... --set image.tag=...`
+  - Registry: push your image and set `image.repository`/`image.tag`; add `imagePullSecrets` if private
+- Ingress host (local testing): set a host you control (e.g., `myapp.local`) and add it to `/etc/hosts` with `minikube ip`
+- Namespace: use `-n your-namespace` consistently; create it if missing
+- Environment:
+  - If you rely on `.env`, mount it via a Secret to `/var/www/html/.env`
+  - Otherwise, add required `env:` items (DB, cache, mail) in `values.yaml`
+- Resources: set realistic `resources.requests/limits` for your cluster
+- Replicas: set `replicaCount` (e.g., 2+) for HA (production)
+- Probes: if your health endpoint is not `/`, update the probe path
+- Security context: adjust UID/GID if your base image differs from `www-data` (33)
+- Persistence: if you need to persist `storage/` or `bootstrap/cache/`, add a PVC and mount it
+- Service type: choose `ClusterIP` (with Ingress) or `NodePort` (without Ingress)
 
-- Local image (Minikube): build locally and import into Minikube’s runtime
+Where to change:
+- `deploy/helm/laravel-app/values.yaml`: image, replicas, resources, env, service, ingress, securityContext
+- `deploy/helm/laravel-app/templates/deployment.yaml`: volumes/volumeMounts (e.g., mount a Secret as `.env`), probes
+
+Apply after editing:
 ```bash
-docker build -f Dockerfile.apache -t phpapp:apache .
-minikube image load phpapp:apache
-helm upgrade --install laravel ./deploy/helm/laravel-app -n laravel \
-  --set image.repository=phpapp --set image.tag=apache
+helm upgrade laravel ./deploy/helm/laravel-app -n laravel -f deploy/helm/laravel-app/values.yaml
 ```
-
-- Registry image (any Kubernetes): push to a registry and reference it
-```bash
-# example: ghcr.io/you/phpapp:1.0.0 or your ECR/GCR/ACR
-IMAGE=ghcr.io/you/phpapp:1.0.0
-docker build -f Dockerfile.apache -t $IMAGE .
-docker push $IMAGE
-
-# create a pull secret (one time per namespace)
-kubectl create secret docker-registry regcred -n laravel \
-  --docker-server=ghcr.io \
-  --docker-username=YOUR_USER \
-  --docker-password=YOUR_TOKEN
-
-# tell Helm to use your image + pull secret
-helm upgrade --install laravel ./deploy/helm/laravel-app -n laravel \
-  --set image.repository=ghcr.io/you/phpapp \
-  --set image.tag=1.0.0 \
-  --set image.pullPolicy=IfNotPresent \
-  --set-string image.pullSecrets[0].name=regcred
-```
-If your chart doesn’t yet support `image.pullSecrets`, add it under `spec.template.spec.imagePullSecrets` in the Deployment template, or store that in `values.yaml` and template it.
-
----
-
-## How env is handled (matches this project)
-- Default behavior inside the container:
-  - If no `.env` is present, the entrypoint copies `.env.example` to `.env` and generates an `APP_KEY`.
-  - It forces `SESSION_DRIVER=file` and `CACHE_STORE=file` so the app runs without DB/Redis.
-- Recommended ways to provide configuration beyond defaults:
-  1) Plain env vars via Helm `values.yaml` (simple for small sets)
-     - Add items under `values.yaml` → `env:` and re-`helm upgrade`.
-  2) Provide a `.env` file via Secret and mount it (best when you already use `.env`)
-     - Create a Secret from your `.env`:
-```bash
-kubectl -n laravel create secret generic app-env --from-file=.env
-```
-     - Mount it to `/var/www/html/.env` in the Deployment (add a `volumes` entry and a `volumeMounts` entry). The entrypoint will detect the file and skip generating.
-  3) Provide sensitive items via Secrets and reference them as env vars (e.g., `DB_PASSWORD`)
-
-Note: If both a mounted `.env` and env vars are present, Laravel will read from `.env`. Keep a single source of truth to avoid confusion.
 
 ---
 
