@@ -5,6 +5,13 @@ This repo contains a base Laravel 12 app with:
 - Entrypoints that generate APP_KEY and force file-based sessions/cache
 - A Helm chart to deploy onto Kubernetes (tested on Minikube)
 
+## Prerequisites
+- Docker 24+
+- kubectl 1.24+
+- Minikube 1.30+ (for local k8s)
+- Helm 3.11+
+- sudo access to edit /etc/hosts (for ingress host mapping)
+
 ## Run with Docker (Apache)
 
 ```bash
