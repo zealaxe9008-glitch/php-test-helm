@@ -26,6 +26,60 @@ Why file-based sessions/cache?
 
 ---
 
+## Images: local vs registry
+You have two ways to make the image available to your cluster.
+
+- Local image (Minikube): build locally and import into Minikube’s runtime
+```bash
+docker build -f Dockerfile.apache -t phpapp:apache .
+minikube image load phpapp:apache
+helm upgrade --install laravel ./deploy/helm/laravel-app -n laravel \
+  --set image.repository=phpapp --set image.tag=apache
+```
+
+- Registry image (any Kubernetes): push to a registry and reference it
+```bash
+# example: ghcr.io/you/phpapp:1.0.0 or your ECR/GCR/ACR
+IMAGE=ghcr.io/you/phpapp:1.0.0
+docker build -f Dockerfile.apache -t $IMAGE .
+docker push $IMAGE
+
+# create a pull secret (one time per namespace)
+kubectl create secret docker-registry regcred -n laravel \
+  --docker-server=ghcr.io \
+  --docker-username=YOUR_USER \
+  --docker-password=YOUR_TOKEN
+
+# tell Helm to use your image + pull secret
+helm upgrade --install laravel ./deploy/helm/laravel-app -n laravel \
+  --set image.repository=ghcr.io/you/phpapp \
+  --set image.tag=1.0.0 \
+  --set image.pullPolicy=IfNotPresent \
+  --set-string image.pullSecrets[0].name=regcred
+```
+If your chart doesn’t yet support `image.pullSecrets`, add it under `spec.template.spec.imagePullSecrets` in the Deployment template, or store that in `values.yaml` and template it.
+
+---
+
+## How env is handled (matches this project)
+- Default behavior inside the container:
+  - If no `.env` is present, the entrypoint copies `.env.example` to `.env` and generates an `APP_KEY`.
+  - It forces `SESSION_DRIVER=file` and `CACHE_STORE=file` so the app runs without DB/Redis.
+- Recommended ways to provide configuration beyond defaults:
+  1) Plain env vars via Helm `values.yaml` (simple for small sets)
+     - Add items under `values.yaml` → `env:` and re-`helm upgrade`.
+  2) Provide a `.env` file via Secret and mount it (best when you already use `.env`)
+     - Create a Secret from your `.env`:
+```bash
+kubectl -n laravel create secret generic app-env --from-file=.env
+```
+     - Mount it to `/var/www/html/.env` in the Deployment (add a `volumes` entry and a `volumeMounts` entry). The entrypoint will detect the file and skip generating.
+  3) Provide sensitive items via Secrets and reference them as env vars (e.g., `DB_PASSWORD`)
+
+Note: If both a mounted `.env` and env vars are present, Laravel will read from `.env`. Keep a single source of truth to avoid confusion.
+
+---
+
 ## Run with Docker (Apache)
 
 ```bash
@@ -91,12 +145,12 @@ You usually don’t edit the templates. Instead, you pass values at install/upgr
 Think of `values.yaml` as the “settings” file. Here are the most common things you’ll change, with exact commands.
 
 1) Change the container image
-- When you have your own image (e.g., pushed to a registry):
+- Local/minikube image:
 ```bash
 helm upgrade --install laravel ./deploy/helm/laravel-app -n laravel \
-  --set image.repository=your-registry/your-image \
-  --set image.tag=1.0.0
+  --set image.repository=phpapp --set image.tag=apache
 ```
+- Registry image (with a pull secret): see “Images: local vs registry”.
 
 2) Scale the app up/down
 ```bash
@@ -113,10 +167,7 @@ helm upgrade laravel ./deploy/helm/laravel-app -n laravel \
   --set env[3].name=DB_USERNAME --set env[3].value=user \
   --set env[4].name=DB_PASSWORD --set env[4].value=pass
 ```
-Tip: If you have many env vars, put them into `deploy/helm/laravel-app/values.yaml` under `env:` and run:
-```bash
-helm upgrade laravel ./deploy/helm/laravel-app -n laravel -f deploy/helm/laravel-app/values.yaml
-```
+Tip: If you already manage config in a `.env`, mount it via Secret as described above.
 
 4) Adjust CPU/Memory resources
 ```bash
@@ -147,7 +198,7 @@ helm upgrade laravel ./deploy/helm/laravel-app -n laravel \
 ```
 
 7) Tweak health checks (readiness/liveness probes)
-- The chart defaults to probing `/` on port 80. If your health URL is different (e.g., `/health`), edit `templates/deployment.yaml` or fork/override the template. For simple apps, `/` works fine.
+- The chart defaults to probing `/` on port 80. If your health URL is different (e.g., `/health`), edit `templates/deployment.yaml` or fork the chart. For simple apps, `/` works.
 
 8) Security context (run as non-root)
 - By default, the container runs as `www-data` (UID/GID 33). If your base image needs other IDs, edit these in `values.yaml` under `podSecurityContext` and `securityContext`.
@@ -157,11 +208,22 @@ If you ever get stuck, see what values are currently in use:
 helm get values laravel -n laravel -a
 ```
 
-Apply changes from `values.yaml` instead of long flags:
+### Prefer editing files instead of CLI flags?
+- Edit `deploy/helm/laravel-app/values.yaml`:
+  - `image.repository`, `image.tag`, `image.pullPolicy`
+  - `replicaCount`
+  - `env:` (list of name/value pairs)
+  - `resources.requests/limits`
+  - `service.type`, `service.port`
+  - `ingress.*` (enabled, className, hosts, annotations)
+- Then apply:
 ```bash
-# Edit deploy/helm/laravel-app/values.yaml, then:
 helm upgrade laravel ./deploy/helm/laravel-app -n laravel -f deploy/helm/laravel-app/values.yaml
 ```
+- If you truly need to change structure (e.g., mount a Secret as `.env`, add volumes), edit `templates/deployment.yaml`:
+  - Add a `volumes:` entry pointing to your Secret/ConfigMap
+  - Add `volumeMounts:` to mount it at `/var/www/html/.env`
+  - Reason: this binds your `.env` into the container so the entrypoint detects and uses it.
 
 ---
 
