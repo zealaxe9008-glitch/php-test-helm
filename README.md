@@ -57,6 +57,26 @@ echo "$(minikube ip) laravel.local" | sudo tee -a /etc/hosts
 curl -I http://laravel.local  # expect HTTP/1.1 200 OK
 ```
 
+## Customize the Helm deployment
+- Image:
+  - Change repo/tag: `--set image.repository=your/repo --set image.tag=your-tag`
+  - Or edit `deploy/helm/laravel-app/values.yaml` under `image:`
+- Replicas: `--set replicaCount=3`
+- Resources: edit `values.yaml` `resources.requests/limits`
+- Env vars: add under `values.yaml` `env:` (e.g., DB config)
+- Ingress: toggle with `--set ingress.enabled=true` and adjust hosts/class/annotations
+- Service type: `--set service.type=NodePort` (then `minikube service ... --url`)
+- Probes: update HTTP paths/timings in `templates/deployment.yaml`
+- Security context: adjust `podSecurityContext`/`securityContext` in `values.yaml`
+
+Apply changes:
+```bash
+helm upgrade laravel ./deploy/helm/laravel-app -n laravel \
+  --set image.repository=your/repo --set image.tag=your-tag
+# or edit values.yaml and run:
+helm upgrade laravel ./deploy/helm/laravel-app -n laravel -f deploy/helm/laravel-app/values.yaml
+```
+
 ## Chart values
 - `image.repository`: container repo (default `phpapp`)
 - `image.tag`: image tag (default `apache`)
