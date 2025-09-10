@@ -16,7 +16,7 @@ This repo ships a clean Laravel 12 app plus everything you need to run it locall
 ---
 
 ## How this is put together (quick tour)
-- Prod image (`Dockerfile.apache`): based on `php:8.3-apache`, installs the PHP bits we need (`pdo_sqlite`, `mbstring`, `zip`), sets `public/` as the docroot, and installs Composer (no dev deps).
+- Prod image (`Dockerfile.apache`): based on `php:8.3-apache`, installs the PHP bits we need (`pdo_sqlite`, `mbstring`, `zip`), sets `public/` as the docroot, and installs Composer (no dev deps) with optimized autoload.
 - Dev image (`Dockerfile`): runs `php artisan serve` and builds Vite assets. Great for local hacking; not for prod.
 - Entrypoint (`docker/apache-entrypoint.sh`): if there’s no `.env`, it copies `.env.example`, generates an `APP_KEY`, sets `SESSION_DRIVER=file` and `CACHE_STORE=file`, clears caches, and starts Apache.
 - Helm chart (`deploy/helm/laravel-app`): a Deployment + Service, with optional Ingress. The production branch adds 2 replicas and health probes by default.
@@ -55,6 +55,7 @@ helm upgrade --install laravel ./deploy/helm/laravel-app -n laravel \
   --set image.pullPolicy=IfNotPresent \
   --set-string image.pullSecrets[0].name=regcred
 ```
+If your chart doesn’t yet template `image.pullSecrets`, add under `spec.template.spec.imagePullSecrets` in the Deployment, or wire it from `values.yaml`.
 
 ---
 
@@ -66,8 +67,18 @@ helm upgrade --install laravel ./deploy/helm/laravel-app -n laravel \
 Create and mount a `.env` Secret (optional, if you need custom config):
 ```bash
 kubectl -n laravel create secret generic app-env --from-file=.env
-# Then add a volume + volumeMount in the Deployment to mount it at /var/www/html/.env
+# templates/deployment.yaml (add):
+#   volumes:
+#     - name: app-env
+#       secret: { secretName: app-env }
+#   containers:
+#     - name: app
+#       volumeMounts:
+#         - name: app-env
+#           mountPath: /var/www/html/.env
+#           subPath: .env
 ```
+Tip: If you use a mounted `.env`, keep env var flags minimal to avoid confusion.
 
 ---
 
@@ -166,6 +177,25 @@ Prefer editing files instead of flags?
 helm upgrade laravel ./deploy/helm/laravel-app -n laravel -f deploy/helm/laravel-app/values.yaml
 ```
 - Need to mount a real `.env`? Edit `templates/deployment.yaml` to add a `volume` pointing to a Secret and a `volumeMount` at `/var/www/html/.env`.
+
+---
+
+## Extra details (for when you want them)
+- Probes (production branch has these on by default):
+  - Readiness/Liveness probe HTTP GET `path: /`, `port: http` (80). Change the path if your app exposes `/health` instead.
+- Security context:
+  - Runs as `www-data` (UID/GID 33). Change `podSecurityContext`/`securityContext` in `values.yaml` if your base image needs different IDs.
+- Persistence:
+  - If you need to persist `storage/` or `bootstrap/cache/`, add a PVC and mount it in `templates/deployment.yaml`. Then you can drop the permissive chmods.
+- Image pull secrets:
+  - If your registry is private, create a Docker registry secret in your namespace and reference it via `image.pullSecrets` in `values.yaml` and/or `templates/deployment.yaml`.
+- Chart values you’ll touch most often:
+  - `image.repository`, `image.tag`, `image.pullPolicy`
+  - `replicaCount`
+  - `env` (array of name/value pairs)
+  - `resources.requests/limits`
+  - `service.type`, `service.port`
+  - `ingress.enabled`, `ingress.className`, `ingress.hosts`, `ingress.annotations`
 
 ---
 
