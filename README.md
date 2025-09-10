@@ -85,30 +85,83 @@ curl -I http://laravel.local  # expect HTTP/1.1 200 OK
 
 ---
 
-## Customize the Helm deployment
-- Image:
-  - Change repo/tag: `--set image.repository=your/repo --set image.tag=your-tag`
-  - Or edit `deploy/helm/laravel-app/values.yaml` under `image:`
-- Replicas: `--set replicaCount=3`
-- Resources: edit `values.yaml` `resources.requests/limits`
-- Env vars: add under `values.yaml` `env:` (e.g., DB/Redis mailer config)
-- Ingress: toggle with `--set ingress.enabled=true` and adjust hosts/class/annotations
-- Service type: `--set service.type=NodePort` (then `minikube service ... --url`)
-- Probes (readiness/liveness): adjust HTTP path (`/`) and timings in `templates/deployment.yaml`
-- Security context: adjust `podSecurityContext`/`securityContext` in `values.yaml`
+## Customize the Helm deployment (beginner-friendly)
+You usually don’t edit the templates. Instead, you pass values at install/upgrade time, or edit `values.yaml` and re-run `helm upgrade`.
 
-Apply changes:
+Think of `values.yaml` as the “settings” file. Here are the most common things you’ll change, with exact commands.
+
+1) Change the container image
+- When you have your own image (e.g., pushed to a registry):
 ```bash
-# quick overrides
-helm upgrade laravel ./deploy/helm/laravel-app -n laravel \
-  --set image.repository=your/repo --set image.tag=your-tag
+helm upgrade --install laravel ./deploy/helm/laravel-app -n laravel \
+  --set image.repository=your-registry/your-image \
+  --set image.tag=1.0.0
+```
 
-# or edit values.yaml and apply
+2) Scale the app up/down
+```bash
+helm upgrade laravel ./deploy/helm/laravel-app -n laravel \
+  --set replicaCount=3
+```
+
+3) Add environment variables (e.g., point to a DB)
+```bash
+helm upgrade laravel ./deploy/helm/laravel-app -n laravel \
+  --set env[0].name=DB_CONNECTION --set env[0].value=mysql \
+  --set env[1].name=DB_HOST --set env[1].value=mysql.default.svc.cluster.local \
+  --set env[2].name=DB_DATABASE --set env[2].value=app \
+  --set env[3].name=DB_USERNAME --set env[3].value=user \
+  --set env[4].name=DB_PASSWORD --set env[4].value=pass
+```
+Tip: If you have many env vars, put them into `deploy/helm/laravel-app/values.yaml` under `env:` and run:
+```bash
 helm upgrade laravel ./deploy/helm/laravel-app -n laravel -f deploy/helm/laravel-app/values.yaml
 ```
 
-Production branch defaults
-- See the `production` branch for: `replicaCount: 2`, readiness/liveness probes, and `Dockerfile.apache` with Composer dev-deps disabled and `APP_DEBUG=false`.
+4) Adjust CPU/Memory resources
+```bash
+# Example: request 200m CPU/256Mi and limit 500m/512Mi
+helm upgrade laravel ./deploy/helm/laravel-app -n laravel \
+  --set resources.requests.cpu=200m \
+  --set resources.requests.memory=256Mi \
+  --set resources.limits.cpu=500m \
+  --set resources.limits.memory=512Mi
+```
+
+5) Switch Service type (NodePort for external access without Ingress)
+```bash
+helm upgrade laravel ./deploy/helm/laravel-app -n laravel \
+  --set service.type=NodePort
+minikube service laravel-laravel-app -n laravel --url
+```
+
+6) Enable/modify Ingress
+```bash
+helm upgrade laravel ./deploy/helm/laravel-app -n laravel \
+  --set ingress.enabled=true \
+  --set ingress.className=nginx \
+  --set ingress.hosts[0].host=myapp.local \
+  --set ingress.hosts[0].paths[0].path=/ \
+  --set ingress.hosts[0].paths[0].pathType=Prefix
+# add "$(minikube ip) myapp.local" to /etc/hosts for local testing
+```
+
+7) Tweak health checks (readiness/liveness probes)
+- The chart defaults to probing `/` on port 80. If your health URL is different (e.g., `/health`), edit `templates/deployment.yaml` or fork/override the template. For simple apps, `/` works fine.
+
+8) Security context (run as non-root)
+- By default, the container runs as `www-data` (UID/GID 33). If your base image needs other IDs, edit these in `values.yaml` under `podSecurityContext` and `securityContext`.
+
+If you ever get stuck, see what values are currently in use:
+```bash
+helm get values laravel -n laravel -a
+```
+
+Apply changes from `values.yaml` instead of long flags:
+```bash
+# Edit deploy/helm/laravel-app/values.yaml, then:
+helm upgrade laravel ./deploy/helm/laravel-app -n laravel -f deploy/helm/laravel-app/values.yaml
+```
 
 ---
 
