@@ -1,0 +1,55 @@
+image:
+  repository: phpapp
+  tag: apache
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: laravel.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+env:
+  - name: APP_ENV
+    value: production
+  - name: APP_DEBUG
+    value: "false"
+  - name: SESSION_DRIVER
+    value: file
+  - name: CACHE_STORE
+    value: file
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 33
+
+securityContext:
+  runAsUser: 33
+  runAsGroup: 33
+  runAsNonRoot: true
