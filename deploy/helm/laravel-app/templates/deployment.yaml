@@ -13,6 +13,11 @@ spec:
     matchLabels:
       app.kubernetes.io/name: {{ include "laravel-app.name" . }}
       app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   template:
     metadata:
       labels:
@@ -37,6 +42,22 @@ spec:
             - name: {{ .name }}
               value: {{ .value | quote }}
 {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 6
           resources:
 {{ toYaml .Values.resources | indent 12 }}
           securityContext:
